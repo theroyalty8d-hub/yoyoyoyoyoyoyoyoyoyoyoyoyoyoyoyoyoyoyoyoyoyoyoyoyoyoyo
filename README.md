@@ -1,1 +1,1 @@
-project for michael, sarim, and maxy waxy
+Project for Michael, Sarim, and Max
