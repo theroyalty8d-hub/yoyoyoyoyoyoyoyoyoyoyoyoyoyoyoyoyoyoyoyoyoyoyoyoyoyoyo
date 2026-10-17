@@ -212,8 +212,9 @@ function applyDamageToActor(actor, amount, sourceText, preventOneShot = false) {
   let dmg = amount;
   if (actor.defending) dmg = Math.ceil(dmg * (1 - actor.defendReduction));
   if (preventOneShot && dmg >= actor.hp) {
-    // leave the actor at 1 HP minimum (but still deal at least 1 damage)
-    dmg = Math.max(1, actor.hp - 1);
+    // cap damage so actor is left with at least 1 HP where possible;
+    // if actor.hp is 1 this makes dmg = 0 (no instant-kill).
+    dmg = Math.max(0, actor.hp - 1);
   }
   actor.hp -= dmg;
   actor.hitFlash = 200;
@@ -672,16 +673,22 @@ function updateEnemyAI(dt) {
   if (enemy.key === 'cyberdio') {
     if (enemy.attackClock > 8000) {
       enemy.attackClock = 0;
-      addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.18)', 700);
-      log('Cyber Dio hacks time and prepares to attack the selected member for 5 HP.');
-      // delay the actual damage so the telegraph is a real warning
-      setTimeout(() => {
-        const current = getSelectedActor();
-        if (current && current.alive) {
-          // apply damage but prevent it from being an instant one-shot
-          applyDamageToActor(current, 5, 'Cyber Dio Time Hit', true);
-        }
-      }, 10,000);
+      // avoid scheduling again while a time-hit is pending
+      if (!enemy.timeHitScheduled) {
+        enemy.timeHitScheduled = true;
+        addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.18)', 700);
+        log('Cyber Dio hacks time and prepares to attack the selected member for 5 HP.');
+        // delay the actual damage so the telegraph is a real warning
+        setTimeout(() => {
+          const current = getSelectedActor();
+          if (current && current.alive) {
+            // apply damage but prevent it from being an instant one-shot
+            applyDamageToActor(current, 5, 'Cyber Dio Time Hit', true);
+          }
+          // clear flag so another time-hit can be scheduled later
+          enemy.timeHitScheduled = false;
+        }, 700);
+      }
     }
 
     if (enemy.attackClock > 1600 && enemy.attackClock < 2200) {
