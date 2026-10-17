@@ -681,7 +681,7 @@ function updateEnemyAI(dt) {
           // apply damage but prevent it from being an instant one-shot
           applyDamageToActor(current, 5, 'Cyber Dio Time Hit', true);
         }
-      }, 700);
+      }, 10,000);
     }
 
     if (enemy.attackClock > 1600 && enemy.attackClock < 2200) {
