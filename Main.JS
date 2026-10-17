@@ -720,7 +720,8 @@ function updateEnemyAI(dt) {
       setTimeout(() => {
         const current = getSelectedActor();
         if (current && current.alive) {
-          damageSelected(7, 'Stop Sign');
+          // use the safe helper so this telegraphed attack can't insta-kill a defended member
+          applyDamageToActor(current, 7, 'Stop Sign', true);
         }
       }, 700);
     }
@@ -735,7 +736,8 @@ function updateEnemyAI(dt) {
         if (current && current.alive) {
           const collides = current.x + current.size > rollerX && current.x < rollerX + 90;
           if (collides) {
-            damageSelected(5, 'Road Roller');
+            // use the safe helper as well
+            applyDamageToActor(current, 5, 'Road Roller', true);
           }
         }
       }, 900);
