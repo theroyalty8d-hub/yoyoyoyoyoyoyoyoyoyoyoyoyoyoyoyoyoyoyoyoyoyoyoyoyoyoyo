@@ -23,6 +23,20 @@ let player3 = {
     speed: 3
 }
 
+function enemy(HP, size, color) {
+    this.HP = HP;
+    this.size = size;
+    this.color = color;
+    this.moveset = moveset;
+
+}
+
+let lightwizard = new enemy(100, 60, "yellow");
+let darkwizard = new enemy(200, 60, "darkpurple");
+let blitz = new enemy(400, 70, "blue");
+let CyberDio = new enemy(500, 45, "black");
+let BitBunny = new enemy(700, 20, "lightblue");
+
 let keys = {};
 let Player = 1
 
@@ -65,9 +79,9 @@ function draw() {
     // Draw the player (a blue square)
     ctx.fillStyle = "red";
     ctx.fillRect(player1.x, player1.y, player1.size, player1.size);
-    ctx.fillStyle = "green";
+    ctx.fillStyle = "silver";
     ctx.fillRect(player2.x, player2.y, player2.size, player2.size);
-    ctx.fillStyle = "yellow";
+    ctx.fillStyle = "green";
     ctx.fillRect(player3.x, player3.y, player3.size, player3.size);
 }
 
