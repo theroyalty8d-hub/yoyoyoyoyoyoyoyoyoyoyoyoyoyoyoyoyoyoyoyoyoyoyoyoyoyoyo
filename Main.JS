@@ -786,7 +786,7 @@ function update(dt) {
 
     if (keys[' ']) {
       keys[' '] = false;
-      if (onlyM1Phase) log('Only M1 is allowed during final phase.');
+      if (onlyM1Phase) log('Only M1 is allowed during the Bit Bunny final phase.');
       else firePlayerM1(actor);
     }
 
@@ -824,8 +824,12 @@ function update(dt) {
     onEnemyDefeated();
   }
 
-  const firstAlive = party.findIndex((p) => p.alive);
-  if (firstAlive !== -1 && firstAlive !== selectedIndex) selectedIndex = firstAlive;
+  // Only change selectedIndex automatically if the currently selected member is missing or dead
+  const currentActor = getSelectedActor();
+  if (!currentActor || !currentActor.alive) {
+    const firstAlive = party.findIndex((p) => p.alive);
+    if (firstAlive !== -1) selectedIndex = firstAlive;
+  }
 }
 
 window.addEventListener('keydown', (e) => {
