@@ -424,6 +424,29 @@ function attackEnemyFromProjectile(p) {
   return false;
 }
 
+function attackRobotFromProjectile(p) {
+  // robots are drawn centered at r.x, r.y, so their box is r.x - size/2 .. r.x + size/2
+  for (let i = robots.length - 1; i >= 0; i--) {
+    const r = robots[i];
+    const left = r.x - r.size / 2;
+    const right = r.x + r.size / 2;
+    const top = r.y - r.size / 2;
+    const bottom = r.y + r.size / 2;
+    const hitX = p.x >= left && p.x <= right;
+    const hitY = p.y >= top && p.y <= bottom;
+    if (hitX && hitY) {
+      r.hp -= p.damage;
+      pushParticle(p.x, p.y, '#ffd700');
+      if (r.hp <= 0) {
+        robots.splice(i, 1);
+        log('A robot was destroyed!');
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 function attackSelectedPlayerFromProjectile(p) {
   const actor = getSelectedActor();
   if (!actor || !actor.alive) return false;
@@ -460,6 +483,11 @@ function updateProjectiles(dt) {
     }
 
     if (p.owner === 'player') {
+      // first allow player shots to hit robots
+      if (attackRobotFromProjectile(p)) {
+        projectiles.splice(i, 1);
+        continue;
+      }
       if (attackEnemyFromProjectile(p)) {
         projectiles.splice(i, 1);
         continue;
@@ -619,16 +647,22 @@ function updateEnemyAI(dt) {
     if (enemy.attackClock > 8000) {
       enemy.attackClock = 0;
       addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.18)', 700);
-      log('Cyber Dio hacks time and attacks the selected member for 5 HP.');
-      const current = getSelectedActor();
-      if (current && current.alive) {
-        current.hp -= 5;
-        if (current.hp <= 0) {
-          current.hp = 0;
-          current.alive = false;
-          transferPending = current;
+      log('Cyber Dio hacks time and prepares to attack the selected member for 5 HP.');
+      // delay the actual damage so the telegraph is a real warning
+      setTimeout(() => {
+        const current = getSelectedActor();
+        if (current && current.alive) {
+          current.hp -= 5;
+          if (current.hp <= 0) {
+            current.hp = 0;
+            current.alive = false;
+            transferPending = current;
+            log(current.name + ' has fallen. Press 1/2/3 to transfer power.');
+          } else {
+            log('Cyber Dio time-hit damaged ' + current.name + ' for 5 HP.');
+          }
         }
-      }
+      }, 700);
     }
 
     if (enemy.attackClock > 1600 && enemy.attackClock < 2200) {
@@ -654,22 +688,31 @@ function updateEnemyAI(dt) {
     }
 
     if (enemy.attackClock > 5200 && enemy.attackClock < 5600) {
+      // show a full-screen-ish telegraph and delay the hit so the player sees the warning
       addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.12)', 700);
-      log('Cyber Dio wields a stop sign and whacks the selected member.');
-      damageSelected(7, 'Stop Sign');
+      log('Cyber Dio prepares to whack the selected member with a Stop Sign.');
+      setTimeout(() => {
+        const current = getSelectedActor();
+        if (current && current.alive) {
+          damageSelected(7, 'Stop Sign');
+        }
+      }, 700);
     }
 
     if (enemy.attackClock > 6400 && enemy.attackClock < 7000) {
       const rollerX = canvas.width - 120;
+      // telegraph the road roller across the selected member's lane
       addTelegraph(rollerX, actor.y - 20, 90, actor.size + 40, 'rgba(255, 0, 0, 0.2)', 900);
-      const current = getSelectedActor();
-      if (current && current.alive) {
-        const collides = current.x + current.size > rollerX && current.x < rollerX + 90;
-        if (collides) {
-          damageSelected(5, 'Road Roller');
+      log('Cyber Dio is rolling the Road Roller through the selected member.');
+      setTimeout(() => {
+        const current = getSelectedActor();
+        if (current && current.alive) {
+          const collides = current.x + current.size > rollerX && current.x < rollerX + 90;
+          if (collides) {
+            damageSelected(5, 'Road Roller');
+          }
         }
-      }
-      log('Cyber Dio rolls the Road Roller through the selected member.');
+      }, 900);
     }
   }
 
