@@ -457,6 +457,11 @@ function attackSelectedPlayerFromProjectile(p) {
     if (actor.defending) dmg = Math.ceil(dmg * (1 - actor.defendReduction));
     actor.hp -= dmg;
     actor.hitFlash = 200;
+    if (p.tamper) {
+      // tamper knives temporarily block passives
+      actor.passiveBlockedUntil = performance.now() + 4000;
+      log(actor.name + "'s passive was tampered with!");
+    }
     if (actor.hp <= 0) {
       actor.hp = 0;
       actor.alive = false;
@@ -652,15 +657,8 @@ function updateEnemyAI(dt) {
       setTimeout(() => {
         const current = getSelectedActor();
         if (current && current.alive) {
-          current.hp -= 5;
-          if (current.hp <= 0) {
-            current.hp = 0;
-            current.alive = false;
-            transferPending = current;
-            log(current.name + ' has fallen. Press 1/2/3 to transfer power.');
-          } else {
-            log('Cyber Dio time-hit damaged ' + current.name + ' for 5 HP.');
-          }
+          // use damageSelected so defending reduces damage and fallthrough is handled consistently
+          damageSelected(5, 'Cyber Dio Time Hit');
         }
       }, 700);
     }
@@ -786,8 +784,9 @@ function update(dt) {
 
     if (keys[' ']) {
       keys[' '] = false;
-      if (onlyM1Phase) log('Only M1 is allowed during the Bit Bunny final phase.');
-      else firePlayerM1(actor);
+      // Always allow M1 to fire (this fixes M1 being blocked during Hyper/Final phases)
+      firePlayerM1(actor);
+      if (onlyM1Phase) log('Final Phase: passive/special are disabled.');
     }
 
     if (keys['c'] || keys['C']) {
