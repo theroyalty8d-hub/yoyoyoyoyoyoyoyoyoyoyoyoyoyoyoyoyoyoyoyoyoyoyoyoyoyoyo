@@ -2,12 +2,26 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 // Game State (Data)
-let player = {
+let player1 = {
     x: 50,
     y: 50,
+    size: 50,
+    speed: 2
+};
+
+let player2 = {
+    x: 50,
+    y: 250,
     size: 30,
     speed: 5
-};
+}
+
+let player3 = {
+    x: 50,
+    y: 450,
+    size: 25,
+    speed: 3
+}
 
 let keys = {};
 
@@ -29,8 +43,12 @@ function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // Draw the player (a blue square)
-    ctx.fillStyle = "blue";
-    ctx.fillRect(player.x, player.y, player.size, player.size);
+    ctx.fillStyle = "red";
+    ctx.fillRect(player1.x, player1.y, player1.size, player1.size);
+    ctx.fillStyle = "green";
+    ctx.fillRect(player2.x, player2.y, player2.size, player2.size);
+    ctx.fillStyle = "yellow";
+    ctx.fillRect(player3.x, player3.y, player3.size, player3.size);
 }
 
 // The Game Loop
