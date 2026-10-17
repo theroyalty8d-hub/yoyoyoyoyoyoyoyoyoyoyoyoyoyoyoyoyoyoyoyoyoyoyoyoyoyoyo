@@ -786,8 +786,9 @@ function update(dt) {
 
     if (keys[' ']) {
       keys[' '] = false;
-      if (onlyM1Phase) log('Only M1 is allowed during final phase.');
-      else firePlayerM1(actor);
+      // Final phase disables passive/special but M1 should still work
+      firePlayerM1(actor);
+      if (onlyM1Phase) log('Final Phase: passive/special are disabled.');
     }
 
     if (keys['c'] || keys['C']) {
@@ -824,8 +825,12 @@ function update(dt) {
     onEnemyDefeated();
   }
 
-  const firstAlive = party.findIndex((p) => p.alive);
-  if (firstAlive !== -1 && firstAlive !== selectedIndex) selectedIndex = firstAlive;
+  // Only change selectedIndex automatically if the currently selected actor is missing or dead
+  const currentActor = getSelectedActor();
+  if (!currentActor || !currentActor.alive) {
+    const firstAlive = party.findIndex((p) => p.alive);
+    if (firstAlive !== -1) selectedIndex = firstAlive;
+  }
 }
 
 window.addEventListener('keydown', (e) => {
