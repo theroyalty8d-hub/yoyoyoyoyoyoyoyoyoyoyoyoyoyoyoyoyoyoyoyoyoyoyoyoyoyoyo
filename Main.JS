@@ -206,6 +206,27 @@ function transferPower(deadMember, receiverIndex) {
   pauseLabel = '';
 }
 
+// helper that applies damage to a specific actor with optional "prevent one-shot" behavior
+function applyDamageToActor(actor, amount, sourceText, preventOneShot = false) {
+  if (!actor || !actor.alive) return;
+  let dmg = amount;
+  if (actor.defending) dmg = Math.ceil(dmg * (1 - actor.defendReduction));
+  if (preventOneShot && dmg >= actor.hp) {
+    // leave the actor at 1 HP minimum (but still deal at least 1 damage)
+    dmg = Math.max(1, actor.hp - 1);
+  }
+  actor.hp -= dmg;
+  actor.hitFlash = 200;
+  log(sourceText + ' hit ' + actor.name + ' for ' + dmg + ' HP.');
+  if (actor.hp <= 0) {
+    actor.hp = 0;
+    actor.alive = false;
+    log(actor.name + ' has fallen. Press 1/2/3 to transfer power.');
+    transferPending = actor;
+    pauseLabel = 'Select the receiver (1/2/3)';
+  }
+}
+
 function damageSelected(amount, sourceText) {
   const actor = getSelectedActor();
   if (!actor || !actor.alive) return;
@@ -657,8 +678,8 @@ function updateEnemyAI(dt) {
       setTimeout(() => {
         const current = getSelectedActor();
         if (current && current.alive) {
-          // use damageSelected so defending reduces damage and fallthrough is handled consistently
-          damageSelected(5, 'Cyber Dio Time Hit');
+          // apply damage but prevent it from being an instant one-shot
+          applyDamageToActor(current, 5, 'Cyber Dio Time Hit', true);
         }
       }, 700);
     }
