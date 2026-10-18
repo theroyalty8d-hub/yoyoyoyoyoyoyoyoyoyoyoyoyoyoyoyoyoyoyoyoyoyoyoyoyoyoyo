@@ -134,6 +134,7 @@ let cursorX = 0;
 let cursorY = 0;
 let lastCursorShot = 0;
 const cursorCooldown = 200; // ms between cursor shots
+const parryWindowMs = 180;
 
 const enemyRoster = [
     { key: 'lightwizard', name: 'Light Wizard', hp: 100, maxHp: 100, size: 72, color: '#f5d942', damage: 7 },
@@ -252,6 +253,8 @@ function resetPartyForRound() {
         p.stunnedUntil = 0;
         p.hitFlash = 0;
         p.lockedUntil = 0;
+        p.parryUntil = 0;
+        p.parryFlashUntil = 0;
     });
 }
 
@@ -335,9 +338,34 @@ function handlePartyMemberDefeated(actor) {
     pauseLabel = 'Select the receiver (1/2/3)';
 }
 
+function tryParry(actor, damage, sourceText, attacker = getAliveEnemy()) {
+    if (!actor.parryUntil || performance.now() > actor.parryUntil) return false;
+    actor.parryUntil = 0;
+    actor.parryFlashUntil = performance.now() + 220;
+    pushParticle(actor.x + actor.size / 2, actor.y + actor.size / 2, '#ffe45e');
+    log(actor.name + ' parried ' + sourceText + '!');
+
+    if (attacker === enemy && attacker.alive) {
+        attacker.hp -= damage;
+        pushParticle(attacker.x + attacker.size / 2, attacker.y + attacker.size / 2, '#ffe45e');
+        log(actor.name + ' reflected ' + damage + ' HP back at ' + attacker.name + '.');
+        if (attacker.hp <= 0) {
+            attacker.hp = 0;
+            attacker.alive = false;
+            onEnemyDefeated();
+        }
+    } else if (robots.includes(attacker)) {
+        attacker.hp -= damage;
+        pushParticle(attacker.x, attacker.y, '#ffe45e');
+        log(actor.name + ' reflected ' + damage + ' HP back at the attacker.');
+    }
+    return true;
+}
+
 // helper that applies damage to a specific actor with optional "prevent one-shot" behavior
-function applyDamageToActor(actor, amount, sourceText, preventOneShot = false) {
+function applyDamageToActor(actor, amount, sourceText, preventOneShot = false, attacker = getAliveEnemy()) {
     if (!actor || !actor.alive) return;
+    if (tryParry(actor, amount, sourceText, attacker)) return;
     let dmg = amount;
     if (actor.defending) dmg = Math.ceil(dmg * (1 - actor.defendReduction));
     if (preventOneShot && dmg >= actor.hp) {
@@ -355,9 +383,10 @@ function applyDamageToActor(actor, amount, sourceText, preventOneShot = false) {
     }
 }
 
-function damageSelected(amount, sourceText) {
+function damageSelected(amount, sourceText, attacker = getAliveEnemy()) {
     const actor = getSelectedActor();
     if (!actor || !actor.alive) return;
+    if (tryParry(actor, amount, sourceText, attacker)) return;
     let dmg = amount;
     if (actor.defending) dmg = Math.ceil(dmg * (1 - actor.defendReduction));
     actor.hp -= dmg;
@@ -511,13 +540,14 @@ function doFinalAttack(actor) {
     actor.pb = 0;
     for (let i = 0; i < 8; i++) {
         projectiles.push({
-            x: boss.x + randInt(0, boss.size),
+            x: boss.x + randInt(-boss.size, boss.size),
             y: -50 - i * 40,
-            vx: randInt(-2, 2),
+            vx: 0,
             vy: 3.2 + i * 0.35,
             radius: 16,
             owner: 'player',
-            damagePercent: 0.55 / 8,
+            damage: boss.maxHp * 0.55,
+            targetBoss: boss,
             piercing: true,
             pierceBoss: false,
             kind: 'meteor',
@@ -580,7 +610,7 @@ function updateRobots(dt) {
         if (r.attackTimer > 1000) {
             r.attackTimer = 0;
             if (dist({ x: r.x + r.size / 2, y: r.y + r.size / 2 }, { x: target.x + target.size / 2, y: target.y + target.size / 2 }) < 40) {
-                damageSelected(r.missile ? 15 : 1, r.missile ? 'Missile' : 'Robot');
+                damageSelected(r.missile ? 15 : 1, r.missile ? 'Missile' : 'Robot', r);
             }
         }
         // remove destroyed robots
@@ -597,14 +627,14 @@ function updateTelegraphs(dt) {
 }
 
 function attackEnemyFromProjectile(p) {
-    const e = getAliveEnemy();
-    if (!e) return false;
+    const e = p.targetBoss || getAliveEnemy();
+    if (!e || !e.alive) return false;
     if (p.piercing && p.pierceBoss && p.lastHitEnemy === e) return false;
     const hitX = p.x >= e.x && p.x <= e.x + e.size;
     const hitY = p.y >= e.y && p.y <= e.y + e.size;
     if (hitX && hitY) {
         if (p.piercing && p.pierceBoss) p.lastHitEnemy = e;
-        e.hp -= p.damagePercent ? e.maxHp * p.damagePercent : p.damage;
+        e.hp -= p.damage;
         pushParticle(p.x, p.y, '#4fe9ff');
         if (e.hp <= 0) {
             e.hp = 0;
@@ -645,6 +675,7 @@ function attackSelectedPlayerFromProjectile(p) {
     const hitX = p.x >= actor.x && p.x <= actor.x + actor.size;
     const hitY = p.y >= actor.y && p.y <= actor.y + actor.size;
     if (hitX && hitY) {
+        if (tryParry(actor, p.damage, p.kind || 'projectile', enemy)) return true;
         let dmg = p.damage;
         if (actor.defending) dmg = Math.ceil(dmg * (1 - actor.defendReduction));
         actor.hp -= dmg;
@@ -1393,7 +1424,7 @@ function togglePause() {
         const duration = now - pauseStartedAt;
         pausedDuration += duration;
         party.forEach((actor) => {
-            ['defendStartAt', 'defendCooldownUntil', 'lastM1', 'passiveBlockedUntil', 'lockedUntil'].forEach((key) => {
+            ['defendStartAt', 'defendCooldownUntil', 'lastM1', 'passiveBlockedUntil', 'lockedUntil', 'parryUntil', 'parryFlashUntil'].forEach((key) => {
                 if (actor[key] > 0) actor[key] += duration;
             });
         });
@@ -1428,7 +1459,9 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'z' || e.key === 'Z') {
         const actor = getSelectedActor();
         const now = performance.now();
-        if (actor && now < actor.defendCooldownUntil) {
+        if (actor && actor.alive && now >= actor.defendCooldownUntil) {
+            actor.parryUntil = now + parryWindowMs;
+        } else if (actor && now < actor.defendCooldownUntil) {
             const sec = Math.ceil((actor.defendCooldownUntil - now) / 1000);
             log(actor.name + ' cannot defend for ' + sec + 's.');
         }
@@ -1553,6 +1586,11 @@ function draw() {
             ctx.strokeStyle = '#1e5bff';
             ctx.lineWidth = 2;
             ctx.strokeRect(member.x - 3, member.y - 3, member.size + 6, member.size + 6);
+        }
+        if (member.parryFlashUntil > performance.now()) {
+            ctx.strokeStyle = '#ffe45e';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(member.x - 6, member.y - 6, member.size + 12, member.size + 12);
         }
     });
 
