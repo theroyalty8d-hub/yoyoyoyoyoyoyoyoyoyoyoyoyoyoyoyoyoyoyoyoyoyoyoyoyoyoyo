@@ -22,6 +22,8 @@ const partyTemplate = [
     speed: 3,
     alive: true,
     defending: false,
+    defendStartAt: 0,
+    defendCooldownUntil: 0,
     m1Gain: 2,
     m1Damage: 10,
     defendReduction: 0.5,
@@ -51,6 +53,8 @@ const partyTemplate = [
     speed: 3.5,
     alive: true,
     defending: false,
+    defendStartAt: 0,
+    defendCooldownUntil: 0,
     m1Gain: 2,
     m1Damage: 10,
     defendReduction: 0.25,
@@ -79,6 +83,8 @@ const partyTemplate = [
     speed: 2.5,
     alive: true,
     defending: false,
+    defendStartAt: 0,
+    defendCooldownUntil: 0,
     m1Gain: 1,
     m1Damage: 15,
     defendReduction: 0.15,
@@ -146,6 +152,8 @@ function resetPartyForRound() {
     p.pb = 0;
     p.alive = true;
     p.defending = false;
+    p.defendStartAt = 0;
+    p.defendCooldownUntil = 0;
     p.lastM1 = 0;
     p.passiveBlockedUntil = 0;
     p.stunnedUntil = 0;
@@ -805,12 +813,42 @@ function update(dt) {
     actor.x = clamp(actor.x, 0, canvas.width - actor.size);
     actor.y = clamp(actor.y, 0, canvas.height - actor.size);
 
+    const now = performance.now();
+
+    // Defend behavior: hold Z to reduce damage for up to 5 seconds, then 10s cooldown
     if (keys['z'] || keys['Z']) {
-      actor.defending = true;
-      actor.pb = clamp(actor.pb + 5, 0, actor.maxPb);
+      if (!actor.defending) {
+        if (now >= actor.defendCooldownUntil) {
+          actor.defending = true;
+          actor.defendStartAt = now;
+          log(actor.name + ' is defending.');
+        } else {
+          // do nothing while on cooldown (a one-time message is shown on keydown)
+        }
+      } else {
+        // already defending: cap hold time
+        if (now - actor.defendStartAt >= 5000) {
+          actor.defending = false;
+          actor.defendCooldownUntil = now + 10000;
+          log(actor.name + "'s defend ended (max hold). Cooldown 10s.");
+        }
+      }
     } else {
-      actor.defending = false;
+      // key released: if was defending, start cooldown
+      if (actor.defending) {
+        actor.defending = false;
+        actor.defendCooldownUntil = now + 10000;
+        log(actor.name + ' stopped defending. Cooldown 10s.');
+      }
     }
+
+    // Note: Z no longer increases PB
+    // if (keys['z'] || keys['Z']) {
+    //   actor.defending = true;
+    //   actor.pb = clamp(actor.pb + 5, 0, actor.maxPb);
+    // } else {
+    //   actor.defending = false;
+    // }
 
     if (keys[' ']) {
       keys[' '] = false;
@@ -867,6 +905,16 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '1') selectedIndex = 0;
   if (e.key === '2') selectedIndex = 1;
   if (e.key === '3') selectedIndex = 2;
+
+  // if player tries to start defending while on cooldown, show one-time message
+  if (e.key === 'z' || e.key === 'Z') {
+    const actor = getSelectedActor();
+    const now = performance.now();
+    if (actor && now < actor.defendCooldownUntil) {
+      const sec = Math.ceil((actor.defendCooldownUntil - now) / 1000);
+      log(actor.name + ' cannot defend for ' + sec + 's.');
+    }
+  }
 });
 window.addEventListener('keyup', (e) => {
   keys[e.key] = false;
