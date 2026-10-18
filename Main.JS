@@ -1,3 +1,4 @@
+// (Full file with modifications: mouse/crosshair and projectile interception)
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 canvas.width = 900;
@@ -28,7 +29,7 @@ const partyTemplate = [
         m1Damage: 10,
         defendReduction: 0.5,
         specialCost: 10,
-        specialDamage: 60,
+        specialDamage: 55,
         counterChance: 1.0,
         passiveCost: 5,
         passiveDamage: 25,
@@ -120,6 +121,12 @@ let enemyTimer = 0;
 let attackIndex = 0;
 let pauseLabel = '';
 let lastShotTime = 0;
+
+// New cursor variables for turret phase interception
+let cursorX = 0;
+let cursorY = 0;
+let lastCursorShot = 0;
+const cursorCooldown = 200; // ms between cursor shots
 
 const enemyRoster = [
     { key: 'lightwizard', name: 'Light Wizard', hp: 100, maxHp: 100, size: 72, color: '#f5d942', damage: 7 },
@@ -279,10 +286,19 @@ function firePlayerM1(actor) {
     }
     actor.lastM1 = now;
     const e = getAliveEnemy();
-    if (!e) { log('There is no enemy to attack.'); return; }
+    // If turret phase, aim at cursor so shots can intercept missiles/bullets at cursor.
+    let targetX, targetY;
+    if (enemy && enemy.bitPhase === 'turret') {
+        targetX = cursorX;
+        targetY = cursorY;
+    } else {
+        if (!e) { log('There is no enemy to attack.'); return; }
+        targetX = e.x + e.size / 2;
+        targetY = e.y + e.size / 2;
+    }
 
-    const dx = (e.x + e.size / 2) - (actor.x + actor.size / 2);
-    const dy = (e.y + e.size / 2) - (actor.y + actor.size / 2);
+    const dx = targetX - (actor.x + actor.size / 2);
+    const dy = targetY - (actor.y + actor.size / 2);
     const len = Math.hypot(dx, dy) || 1;
     projectiles.push({
         x: actor.x + actor.size / 2,
@@ -554,6 +570,31 @@ function updateProjectiles(dt) {
                 projectiles.splice(i, 1);
                 continue;
             }
+        }
+
+        // New: allow player projectiles to intercept enemy projectiles (projectile vs projectile)
+        if (p.owner === 'player') {
+            let intercepted = false;
+            for (let j = projectiles.length - 1; j >= 0; j--) {
+                const q = projectiles[j];
+                if (q.owner === 'enemy') {
+                    const dx = p.x - q.x;
+                    const dy = p.y - q.y;
+                    const rsum = (p.radius || 0) + (q.radius || 0) + 0.5;
+                    if (Math.hypot(dx, dy) < rsum) {
+                        // remove both safely by removing the higher index first
+                        const idx1 = Math.max(i, j);
+                        const idx2 = Math.min(i, j);
+                        pushParticle(q.x, q.y, '#ffffff');
+                        projectiles.splice(idx1, 1);
+                        projectiles.splice(idx2, 1);
+                        log('Enemy projectile intercepted!');
+                        intercepted = true;
+                        break;
+                    }
+                }
+            }
+            if (intercepted) continue;
         }
 
         if (p.owner === 'player') {
@@ -1187,6 +1228,34 @@ function update(dt) {
     }
 }
 
+// Destroy enemy projectiles/robots near point (cursor click helper)
+function destroyAtPoint(x, y, radius = 24) {
+    // destroy projectiles (enemy-owned)
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        if (p.owner === 'enemy') {
+            const dx = p.x - x;
+            const dy = p.y - y;
+            if (Math.hypot(dx, dy) <= radius + (p.radius || 0)) {
+                pushParticle(p.x, p.y, '#ffffff');
+                projectiles.splice(i, 1);
+                log('Destroyed an incoming projectile!');
+            }
+        }
+    }
+    // destroy missile-robots
+    for (let i = robots.length - 1; i >= 0; i--) {
+        const r = robots[i];
+        const dx = r.x - x;
+        const dy = r.y - y;
+        if (Math.hypot(dx, dy) <= radius + (r.size || 0) / 2) {
+            robots.splice(i, 1);
+            pushParticle(x, y, '#ffd700');
+            log('Destroyed a missile!');
+        }
+    }
+}
+
 window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     keys[e.key] = true;
@@ -1206,6 +1275,27 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => {
     keys[e.key] = false;
+});
+
+// Mouse handling for crosshair and clicking to destroy incoming bullets/missiles
+canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    cursorX = e.clientX - rect.left;
+    cursorY = e.clientY - rect.top;
+});
+canvas.addEventListener('mousedown', (e) => {
+    // only allow cursor-shot in turret phase
+    if (enemy && enemy.bitPhase === 'turret') {
+        const now = performance.now();
+        if (now - lastCursorShot >= cursorCooldown) {
+            lastCursorShot = now;
+            // destroy bullets/robots near cursor immediately
+            destroyAtPoint(cursorX, cursorY, 28);
+        }
+    }
+});
+canvas.addEventListener('mouseup', (e) => {
+    // no-op for now
 });
 
 function draw() {
@@ -1309,6 +1399,33 @@ function draw() {
     ctx.fillText('Controls: Arrows move, Space M1, Z defend, C passive, X special/final', 20, 48);
     if (transferPending) ctx.fillText('Transfer power: press 1, 2, or 3', 20, 70);
     if (onlyM1Phase) ctx.fillText('Final Phase: only M1 is allowed.', 20, 92);
+
+    // Draw crosshair at cursor during turret phase
+    if (enemy && enemy.bitPhase === 'turret') {
+        ctx.save();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.92;
+        // circle
+        ctx.beginPath();
+        ctx.arc(cursorX, cursorY, 16, 0, Math.PI * 2);
+        ctx.stroke();
+        // lines
+        ctx.beginPath();
+        ctx.moveTo(cursorX - 22, cursorY);
+        ctx.lineTo(cursorX - 8, cursorY);
+        ctx.moveTo(cursorX + 8, cursorY);
+        ctx.lineTo(cursorX + 22, cursorY);
+        ctx.moveTo(cursorX, cursorY - 22);
+        ctx.lineTo(cursorX, cursorY - 8);
+        ctx.moveTo(cursorX, cursorY + 8);
+        ctx.lineTo(cursorX, cursorY + 22);
+        ctx.stroke();
+        ctx.restore();
+        ctx.fillStyle = '#000';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Click to intercept bullets', cursorX + 18, cursorY - 18);
+    }
 
     for (let i = 0; i < messages.length; i++) {
         ctx.fillText(messages[i], 20, canvas.height - 22 - i * 18);
