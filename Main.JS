@@ -158,6 +158,7 @@ function resetPartyForRound() {
     p.passiveBlockedUntil = 0;
     p.stunnedUntil = 0;
     p.hitFlash = 0;
+    p.lockedUntil = 0;
   });
 }
 
@@ -182,7 +183,15 @@ function spawnEnemy(index) {
     turretLockTimer: 0,
     canMove: true,
     createdRobots: 0,
-    debug: 'spawned'
+    debug: 'spawned',
+    // bitbunny-specific
+    bitPhase: null,
+    bitPhaseTimer: 0,
+    bitGuns: null,
+    bitFall: null,
+    bitHyper: null,
+    bitTurret: null,
+    bitFinale: null
   };
   attackIndex = 0;
   enemyTimer = 0;
@@ -408,23 +417,53 @@ function spawnRobot(x, y) {
   });
 }
 
+function spawnMissile(x, y) {
+  // missiles are just robots with different appearance and hp so they can be shot down
+  robots.push({
+    x, y,
+    size: 18,
+    hp: 3,
+    alive: true,
+    attackTimer: 0,
+    vx: 0,
+    vy: 0,
+    missile: true,
+    color: '#ff6666'
+  });
+}
+
 function updateRobots(dt) {
   for (let i = robots.length - 1; i >= 0; i--) {
     const r = robots[i];
     const target = getSelectedActor();
     if (!target || !target.alive) continue;
-    const dx = (target.x + target.size / 2) - r.x;
-    const dy = (target.y + target.size / 2) - r.y;
-    const len = Math.hypot(dx, dy) || 1;
-    r.x += (dx / len) * 0.7 * (dt / 16);
-    r.y += (dy / len) * 0.7 * (dt / 16);
+    if (r.missile) {
+      // missiles head straight toward the selected member at spawn
+      if (!r.vx && !r.vy) {
+        const dx = (target.x + target.size / 2) - r.x;
+        const dy = (target.y + target.size / 2) - r.y;
+        const len = Math.hypot(dx, dy) || 1;
+        r.vx = (dx / len) * 3.5;
+        r.vy = (dy / len) * 3.5;
+      }
+      r.x += r.vx * (dt / 16);
+      r.y += r.vy * (dt / 16);
+    } else {
+      const dx = (target.x + target.size / 2) - r.x;
+      const dy = (target.y + target.size / 2) - r.y;
+      const len = Math.hypot(dx, dy) || 1;
+      r.x += (dx / len) * 0.7 * (dt / 16);
+      r.y += (dy / len) * 0.7 * (dt / 16);
+    }
     r.attackTimer += dt;
     if (r.attackTimer > 1000) {
       r.attackTimer = 0;
       if (dist({ x: r.x + r.size / 2, y: r.y + r.size / 2 }, { x: target.x + target.size / 2, y: target.y + target.size / 2 }) < 40) {
-        damageSelected(1, 'Robot');
+        damageSelected(r.missile ? 15 : 1, r.missile ? 'Missile' : 'Robot');
       }
     }
+    // remove destroyed robots
+    if (r.hp <= 0) robots.splice(i, 1);
   }
 }
 
@@ -543,6 +582,212 @@ function updateProjectiles(dt) {
 function spawnSpellbookWarning(x, y, ttl = 1200) {
   addTelegraph(x - 25, y - 25, 50, 50, 'rgba(140, 0, 255, 0.42)', ttl);
 }
+
+// --- Bit Bunny custom behaviors/helpers ---
+function startBitBunnyGuns() {
+  const actor = getSelectedActor();
+  if (!actor) return;
+  enemy.bitPhase = 'guns';
+  enemy.bitPhaseTimer = 0;
+  const cx = actor.x + actor.size / 2;
+  const cy = actor.y + actor.size / 2;
+  const guns = [];
+  const count = 10;
+  for (let i = 0; i < count; i++) {
+    const ang = (Math.PI * 2 / count) * i;
+    guns.push({
+      x: cx + Math.cos(ang) * 140,
+      y: cy + Math.sin(ang) * 140,
+      ang
+n    });
+  }
+  enemy.bitGuns = { guns, cycleTimer: 0, duration: 10000, teleTimer: 0 };
+  // show telegraphs
+  guns.forEach(g => addTelegraph(g.x - 8, g.y - 8, 16, 16, 'rgba(255,200,0,0.35)', enemy.bitGuns.duration));
+  log('Bit Bunny: Guns of Glory (trapping circle)');
+}
+
+function updateBitBunnyGuns(dt) {
+  if (!enemy.bitGuns) return;
+  enemy.bitGuns.cycleTimer += dt;
+  enemy.bitGuns.teleTimer += dt;
+  enemy.bitPhaseTimer += dt;
+  // every 3000ms teleport player to center and fire inward bullets
+  if (enemy.bitGuns.cycleTimer > 3000) {
+    enemy.bitGuns.cycleTimer = 0;
+    const actor = getSelectedActor();
+    if (!actor || !actor.alive) return;
+    const cx = actor.x + actor.size / 2;
+    const cy = actor.y + actor.size / 2;
+    // teleport actor to centre of circle
+    actor.x = canvas.width / 2 - actor.size / 2;
+    actor.y = canvas.height / 2 - actor.size / 2;
+    // fire bullets inward from each gun
+    for (const g of enemy.bitGuns.guns) {
+      const dx = (actor.x + actor.size / 2) - g.x;
+      const dy = (actor.y + actor.size / 2) - g.y;
+      const len = Math.hypot(dx, dy) || 1;
+      projectiles.push({ x: g.x, y: g.y, vx: (dx / len) * 4.5, vy: (dy / len) * 4.5, radius: 6, owner: 'enemy', damage: 5, kind: 'bullet', ttl: 4000 });
+    }
+    log('Guns of Glory: player teleported to the centre and guns fired!');
+  }
+  if (enemy.bitPhaseTimer > enemy.bitGuns.duration) {
+    enemy.bitPhase = null;
+    enemy.bitGuns = null;
+    telegraphs = telegraphs.filter(t => t.color !== 'rgba(255,200,0,0.35)');
+    log('Guns of Glory ended.');
+  }
+}
+
+function startFallToHell() {
+  enemy.bitPhase = 'fall';
+  enemy.bitPhaseTimer = 0;
+  enemy.bitFall = { duration: 9000, spawnTimer: 0 };
+  log('Bit Bunny: Fall to Hell!');
+}
+
+function updateFallToHell(dt) {
+  const f = enemy.bitFall;
+  if (!f) return;
+  f.spawnTimer += dt;
+  enemy.bitPhaseTimer += dt;
+  // spawn debris frequently
+  if (f.spawnTimer > 300) {
+    f.spawnTimer = 0;
+    // debris falls from top
+    const x = randInt(100, canvas.width - 100);
+    projectiles.push({ x, y: -20, vx: randInt(-1,1), vy: 2 + Math.random()*2, radius: 10, owner: 'enemy', damage: 3, kind: 'debris', ttl: 6000 });
+    // occasionally Bit Bunny itself falls quickly across the screen as a heavy hit
+    if (Math.random() < 0.18) {
+      projectiles.push({ x: randInt(200, canvas.width - 200), y: -80, vx: randInt(-2,2), vy: 6 + Math.random()*4, radius: 20, owner: 'enemy', damage: 12, kind: 'falling', ttl: 6000 });
+    }
+  }
+  if (enemy.bitPhaseTimer > f.duration) {
+    enemy.bitPhase = null;
+    enemy.bitFall = null;
+    log('Fall to Hell ended.');
+  }
+}
+
+function startHyperBit() {
+  enemy.bitPhase = 'hyper';
+  enemy.bitPhaseTimer = 0;
+  // place telegraphs (!) across the playfield
+  const marks = [];
+  for (let i = 0; i < 8; i++) {
+    const x = randInt(150, canvas.width - 200);
+    const y = randInt(80, canvas.height - 80);
+    marks.push({ x, y, w: 40, h: 40, ttl: 8000 });
+    addTelegraph(x - 20, y - 20, 40, 40, 'rgba(255,80,80,0.45)', 8000);
+  }
+  enemy.bitHyper = { marks, chargeTimer: 0, idx: 0, duration: 8000 };
+  log('Bit Bunny: Hyper Bit Bunny (avoid the ! marks)');
+}
+
+function updateHyperBit(dt) {
+  const h = enemy.bitHyper;
+  if (!h) return;
+  enemy.bitPhaseTimer += dt;
+  h.chargeTimer += dt;
+  // charge through marks one by one quickly
+  if (h.chargeTimer > 350 && h.idx < h.marks.length) {
+    const m = h.marks[h.idx++];
+    h.chargeTimer = 0;
+    // Bit Bunny charges through this mark - if player is on it, take damage
+    const actor = getSelectedActor();
+    if (actor && actor.alive) {
+      const centerX = actor.x + actor.size/2;
+      const centerY = actor.y + actor.size/2;
+      const inside = centerX > m.x - 20 && centerX < m.x + 20 && centerY > m.y - 20 && centerY < m.y + 20;
+      if (inside) applyDamageToActor(actor, 10, 'Hyper Bit Bunny');
+    }
+    // visual: spawn a fast projectile across the mark
+    projectiles.push({ x: m.x, y: m.y, vx: (Math.random()-0.5)*8, vy: (Math.random()-0.5)*8, radius: 10, owner: 'enemy', damage: 4, kind: 'fast', ttl: 2000 });
+  }
+  if (enemy.bitPhaseTimer > h.duration || h.idx >= h.marks.length) {
+    enemy.bitPhase = null;
+    enemy.bitHyper = null;
+    // clear those telegraphs
+    telegraphs = telegraphs.filter(t => t.color !== 'rgba(255,80,80,0.45)');
+    log('Hyper Bit Bunny ended.');
+  }
+}
+
+function startTurreteer() {
+  enemy.bitPhase = 'turret';
+  enemy.bitPhaseTimer = 0;
+  enemy.bitTurret = { duration: 9000, missileTimer: 0 };
+  const actor = getSelectedActor();
+  if (actor) {
+    // lock player in place for the turret duration
+    actor.lockedUntil = performance.now() + enemy.bitTurret.duration;
+  }
+  log('Bit Bunny: Turreteer - player locked on turret!');
+}
+
+function updateTurreteer(dt) {
+  const t = enemy.bitTurret;
+  if (!t) return;
+  t.missileTimer += dt;
+  enemy.bitPhaseTimer += dt;
+  if (t.missileTimer > 800) {
+    t.missileTimer = 0;
+    // spawn a missile that will home in on the player; player must shoot it down
+    spawnMissile(randInt(200, canvas.width - 200), -20);
+  }
+  if (enemy.bitPhaseTimer > t.duration) {
+    enemy.bitPhase = null;
+    enemy.bitTurret = null;
+    log('Turreteer ended.');
+  }
+}
+
+function startTimedFinale() {
+  enemy.bitPhase = 'timedfinale';
+  enemy.bitPhaseTimer = 0;
+  enemy.bitFinale = { duration: 9000, fireTimer: 0, bgTimer: 0 };
+  log('Bit Bunny: Timed Finale!');
+}
+
+function updateTimedFinale(dt) {
+  const f = enemy.bitFinale;
+  if (!f) return;
+  f.fireTimer += dt;
+  f.bgTimer += dt;
+  enemy.bitPhaseTimer += dt;
+  const actor = getSelectedActor();
+  if (f.fireTimer > 250) {
+    f.fireTimer = 0;
+    // swirl bullets around the player
+    if (actor && actor.alive) {
+      const cx = actor.x + actor.size/2;
+      const cy = actor.y + actor.size/2;
+      const count = 6;
+      for (let i = 0; i < count; i++) {
+        const ang = Math.random() * Math.PI*2;
+        projectiles.push({ x: enemy.x + enemy.size/2, y: enemy.y + enemy.size/2, vx: Math.cos(ang)*(2+Math.random()*3), vy: Math.sin(ang)*(2+Math.random()*3), radius: 6, owner: 'enemy', damage: 3, kind: 'bullet', ttl: 4000 });
+      }
+    }
+  }
+  // visual background flicker effect - use telegraphs covering randomized rectangles
+  if (f.bgTimer > 400) {
+    f.bgTimer = 0;
+    addTelegraph(randInt(0, canvas.width-120), randInt(0, canvas.height-80), randInt(60,200), randInt(40,140), 'rgba(200,255,255,0.08)', 600);
+  }
+  if (enemy.bitPhaseTimer > f.duration) {
+    // glitch parts of screen then damage
+    addTelegraph(0,0,canvas.width,canvas.height,'rgba(255,255,255,0.12)',700);
+    setTimeout(()=>{
+      const current = getSelectedActor();
+      if (current && current.alive) applyDamageToActor(current, 10, 'Timed Finale');
+    },700);
+    enemy.bitPhase = null;
+    enemy.bitFinale = null;
+    log('Timed Finale ended.');
+  }
+}
+
+// --- end of Bit Bunny helpers ---
 
 function updateEnemyAI(dt) {
   if (!enemy || !enemy.alive) return;
@@ -690,8 +935,17 @@ function updateEnemyAI(dt) {
         setTimeout(() => {
           const current = getSelectedActor();
           if (current && current.alive) {
-            // apply damage but prevent it from being an instant one-shot
-            applyDamageToActor(current, 5, 'Cyber Dio Time Hit', true);
+            // direct HP subtraction: unblockable/undodgeable/uncounterable 5 HP total
+            current.hp -= 5;
+            current.hitFlash = 200;
+            if (current.hp <= 0) {
+              current.hp = 0;
+              current.alive = false;
+              transferPending = current;
+              log(current.name + ' has fallen. Press 1/2/3 to transfer power.');
+            } else {
+              log('Cyber Dio time-hit damaged ' + current.name + ' for 5 HP.');
+            }
           }
           // clear flag so another time-hit can be scheduled later
           enemy.timeHitScheduled = false;
@@ -753,6 +1007,7 @@ function updateEnemyAI(dt) {
   }
 
   if (enemy.key === 'bitbunny') {
+    // If in final phase (<=10HP) keep techno meteor behavior
     if (enemy.hp <= 10) {
       onlyM1Phase = true;
       if (enemy.attackClock > 500) {
@@ -773,25 +1028,41 @@ function updateEnemyAI(dt) {
       return;
     }
 
-    if (enemy.attackClock > 2000) {
+    // Decide when to start a new sub-attack if none active
+    if (!enemy.bitPhase) {
+      // pick an attack randomly, weighted
+      const r = Math.random();
+      if (r < 0.25) startBitBunnyGuns();
+      else if (r < 0.45) startFallToHell();
+      else if (r < 0.65) startHyperBit();
+      else if (r < 0.85) startTurreteer();
+      else startTimedFinale();
+    }
+
+    // update whichever bit phase is active
+    if (enemy.bitPhase === 'guns') updateBitBunnyGuns(dt);
+    if (enemy.bitPhase === 'fall') updateFallToHell(dt);
+    if (enemy.bitPhase === 'hyper') updateHyperBit(dt);
+    if (enemy.bitPhase === 'turret') updateTurreteer(dt);
+    if (enemy.bitPhase === 'timedfinale') updateTimedFinale(dt);
+
+    // Occasionally also perform a small random shot pattern as a filler
+    if (enemy.attackClock > 2000 && Math.random() < 0.25) {
       enemy.attackClock = 0;
-      for (let i = 0; i < 8; i++) {
-        const ang = (Math.PI * 2 / 8) * i;
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
+      for (let i = 0; i < 6; i++) {
+        const ang = Math.random() * Math.PI * 2;
         projectiles.push({
-          x: cx + Math.cos(ang) * 120,
-          y: cy + Math.sin(ang) * 120,
-          vx: Math.cos(ang) * -2.5,
-          vy: Math.sin(ang) * -2.5,
-          radius: 5,
+          x: enemy.x + enemy.size/2,
+          y: enemy.y + enemy.size/2,
+          vx: Math.cos(ang) * (1 + Math.random()*3),
+          vy: Math.sin(ang) * (1 + Math.random()*3),
+          radius: 6,
           owner: 'enemy',
-          damage: 5,
+          damage: 4,
           kind: 'bullet',
-          ttl: 5000
+          ttl: 3000
         });
       }
-      log('Bit Bunny: Guns of Glory.');
     }
   }
 }
@@ -806,14 +1077,16 @@ function update(dt) {
 
   const actor = getSelectedActor();
   if (actor && actor.alive) {
-    if (keys['ArrowRight']) actor.x += actor.speed * (dt / 16);
-    if (keys['ArrowLeft']) actor.x -= actor.speed * (dt / 16);
-    if (keys['ArrowUp']) actor.y -= actor.speed * (dt / 16);
-    if (keys['ArrowDown']) actor.y += actor.speed * (dt / 16);
+    const now = performance.now();
+    // movement blocked when locked (e.g., Turreteer)
+    if (!(actor.lockedUntil && now < actor.lockedUntil)) {
+      if (keys['ArrowRight']) actor.x += actor.speed * (dt / 16);
+      if (keys['ArrowLeft']) actor.x -= actor.speed * (dt / 16);
+      if (keys['ArrowUp']) actor.y -= actor.speed * (dt / 16);
+      if (keys['ArrowDown']) actor.y += actor.speed * (dt / 16);
+    }
     actor.x = clamp(actor.x, 0, canvas.width - actor.size);
     actor.y = clamp(actor.y, 0, canvas.height - actor.size);
-
-    const now = performance.now();
 
     // Defend behavior: hold Z to reduce damage for up to 5 seconds, then 10s cooldown
     if (keys['z'] || keys['Z']) {
@@ -976,7 +1249,7 @@ function draw() {
   }
 
   for (const r of robots) {
-    ctx.fillStyle = '#7d7d7d';
+    ctx.fillStyle = r.color || '#7d7d7d';
     ctx.fillRect(r.x - r.size / 2, r.y - r.size / 2, r.size, r.size);
   }
 
