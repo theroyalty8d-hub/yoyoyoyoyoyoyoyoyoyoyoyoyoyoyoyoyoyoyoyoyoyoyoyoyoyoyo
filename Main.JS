@@ -119,6 +119,9 @@ let runStartedAt = 0;
 let runFinishedAt = null;
 let pauseStartedAt = 0;
 let pausedDuration = 0;
+let bossBreakRemainingMs = 0;
+let bossBreakTimerAtStart = null;
+let bossBreakDurationTotal = 0;
 const gameTimeouts = new Set();
 let transferPending = null;
 let onlyM1Phase = false;
@@ -134,7 +137,8 @@ let cursorX = 0;
 let cursorY = 0;
 let lastCursorShot = 0;
 const cursorCooldown = 200; // ms between cursor shots
-const parryWindowMs = 180;
+const parryWindowMs = 350;
+const finalAttackCost = 10;
 
 const enemyRoster = [
     { key: 'lightwizard', name: 'Light Wizard', hp: 100, maxHp: 100, size: 72, color: '#f5d942', damage: 7 },
@@ -166,7 +170,6 @@ function loadLeaderboard() {
 
 function recordWinTime(timeMs) {
     leaderboard.push({ timeMs });
-    leaderboard.sort((a, b) => a.timeMs - b.timeMs);
     leaderboard = leaderboard.slice(0, 5);
     try {
         localStorage.setItem(LEADERBOARD_STORAGE_KEY, JSON.stringify(leaderboard));
@@ -184,8 +187,9 @@ function formatRunTime(timeMs) {
 
 function getRunElapsedMs() {
     if (!gameStarted) return 0;
+    if (bossBreakTimerAtStart !== null) return bossBreakTimerAtStart;
     const endTime = runFinishedAt ?? (gamePaused ? pauseStartedAt : performance.now());
-    return Math.max(0, endTime - runStartedAt - pausedDuration);
+    return Math.max(0, endTime - runStartedAt - pausedDuration - bossBreakDurationTotal);
 }
 
 function armGameTimeout(task) {
@@ -196,7 +200,6 @@ function armGameTimeout(task) {
         task.callback();
     }, task.remaining);
 }
-
 function scheduleGameTimeout(callback, delay) {
     const task = { callback, remaining: delay, startedAt: 0, timerId: null };
     gameTimeouts.add(task);
@@ -310,8 +313,13 @@ function onEnemyDefeated() {
         return;
     }
     resetPartyForRound();
-    spawnEnemy(currentEnemyIndex);
-    log('New enemy: ' + enemy.name + '. Party restored to full HP.');
+    enemy = null;
+    telegraphs = [];
+    robots = [];
+    clearPendingGameTimeouts();
+    bossBreakTimerAtStart = getRunElapsedMs();
+    bossBreakRemainingMs = 5000;
+    log('Boss defeated. Next boss in 5 seconds.');
 }
 
 function transferPower(deadMember, receiverIndex) {
@@ -533,11 +541,11 @@ function doFinalAttack(actor) {
     if (!actor || !actor.alive) return;
     const boss = getAliveEnemy();
     if (!boss) return;
-    if (actor.pb < actor.maxPb) {
-        log(actor.name + ' needs full PB for the Final Attack.');
+    if (actor.pb < finalAttackCost) {
+        log(actor.name + ' needs ' + finalAttackCost + ' PB for the Final Attack.');
         return;
     }
-    actor.pb = 0;
+    actor.pb -= finalAttackCost;
     for (let i = 0; i < 8; i++) {
         projectiles.push({
             x: boss.x + randInt(-boss.size, boss.size),
@@ -546,7 +554,7 @@ function doFinalAttack(actor) {
             vy: 3.2 + i * 0.35,
             radius: 16,
             owner: 'player',
-            damage: boss.maxHp * 0.55,
+            damage: boss.maxHp * 0.45,
             targetBoss: boss,
             piercing: true,
             pierceBoss: false,
@@ -554,7 +562,7 @@ function doFinalAttack(actor) {
             ttl: 10000
         });
     }
-    log(actor.name + ' used the Final Attack!');
+    log(actor.name + ' used the Final Attack! (-' + finalAttackCost + ' PB).');
 }
 
 function spawnRobot(x, y) {
@@ -1284,6 +1292,17 @@ function updateEnemyAI(dt) {
 
 function update(dt) {
     if (!gameStarted || gamePaused || runFinishedAt !== null) return;
+    if (bossBreakRemainingMs > 0) {
+        projectiles = [];
+        bossBreakRemainingMs = Math.max(0, bossBreakRemainingMs - dt);
+        if (bossBreakRemainingMs === 0) {
+            bossBreakDurationTotal += 5000;
+            bossBreakTimerAtStart = null;
+            spawnEnemy(currentEnemyIndex);
+            log('New enemy: ' + enemy.name + '. Party restored to full HP.');
+        }
+        return;
+    }
     if (transferPending) {
         if (keys['1']) { transferPower(transferPending, 0); keys['1'] = false; }
         if (keys['2']) { transferPower(transferPending, 1); keys['2'] = false; }
@@ -1350,13 +1369,14 @@ function update(dt) {
         holdXStartedAt = null;
         const current = getSelectedActor();
         if (current && current.alive) {
-            if (held >= 600 && current.pb >= current.maxPb) doFinalAttack(current);
+            if (held >= 600 && current.pb >= finalAttackCost) doFinalAttack(current);
             else if (!onlyM1Phase) doSpecial(current);
         }
     }
     if ((keys['x'] || keys['X']) && !holdXStartedAt) holdXStartedAt = performance.now();
 
     updateProjectiles(dt);
+    if (bossBreakRemainingMs > 0) return;
     updateTelegraphs(dt);
     updateRobots(dt);
     updateEnemyAI(dt);
@@ -1629,6 +1649,19 @@ function draw() {
         ctx.fillText('Click to intercept bullets', cursorX + 18, cursorY - 18);
     }
 
+    if (bossBreakRemainingMs > 0 && !gamePaused) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillText('BOSS DEFEATED!', canvas.width / 2, canvas.height / 2 - 14);
+        ctx.font = '18px sans-serif';
+        ctx.fillText('Next boss in ' + Math.ceil(bossBreakRemainingMs / 1000) + '...', canvas.width / 2, canvas.height / 2 + 24);
+        ctx.restore();
+    }
+
     if (!gameStarted) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1693,6 +1726,9 @@ function initGame() {
     runFinishedAt = null;
     pauseStartedAt = 0;
     pausedDuration = 0;
+    bossBreakRemainingMs = 0;
+    bossBreakTimerAtStart = null;
+    bossBreakDurationTotal = 0;
     resetPartyForRound();
     spawnEnemy(0);
     tutorialMode = true;
