@@ -190,6 +190,7 @@ function spawnEnemy(index) {
         turretLockTimer: 0,
         canMove: true,
         createdRobots: 0,
+        attackFlags: {},
         debug: 'spawned',
         // bitbunny-specific
         bitPhase: null,
@@ -213,7 +214,7 @@ function onEnemyDefeated() {
     currentEnemyIndex += 1;
     if (currentEnemyIndex >= enemyRoster.length) {
         enemy = null;
-        log('All enemies were cleared.');
+        log('YOU WIN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
         return;
     }
     resetPartyForRound();
@@ -228,6 +229,21 @@ function transferPower(deadMember, receiverIndex) {
     log(deadMember.name + "'s power bar has been passed to " + receiver.name + '.');
     transferPending = null;
     pauseLabel = '';
+}
+
+function handlePartyMemberDefeated(actor) {
+    if (getAliveParty().length === 0) {
+        transferPending = null;
+        pauseLabel = '';
+        log(actor.name + ' has fallen.');
+        if (currentEnemyIndex < enemyRoster.length) {
+            log('YOU LOSE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+        }
+        return;
+    }
+    log(actor.name + ' has fallen. Press 1/2/3 to transfer power.');
+    transferPending = actor;
+    pauseLabel = 'Select the receiver (1/2/3)';
 }
 
 // helper that applies damage to a specific actor with optional "prevent one-shot" behavior
@@ -246,9 +262,7 @@ function applyDamageToActor(actor, amount, sourceText, preventOneShot = false) {
     if (actor.hp <= 0) {
         actor.hp = 0;
         actor.alive = false;
-        log(actor.name + ' has fallen. Press 1/2/3 to transfer power.');
-        transferPending = actor;
-        pauseLabel = 'Select the receiver (1/2/3)';
+        handlePartyMemberDefeated(actor);
     }
 }
 
@@ -263,9 +277,7 @@ function damageSelected(amount, sourceText) {
     if (actor.hp <= 0) {
         actor.hp = 0;
         actor.alive = false;
-        log(actor.name + ' has fallen. Press 1/2/3 to transfer power.');
-        transferPending = actor;
-        pauseLabel = 'Select the receiver (1/2/3)';
+        handlePartyMemberDefeated(actor);
     }
 }
 
@@ -550,9 +562,7 @@ function attackSelectedPlayerFromProjectile(p) {
         if (actor.hp <= 0) {
             actor.hp = 0;
             actor.alive = false;
-            log(actor.name + ' has fallen. Press 1/2/3 to transfer power.');
-            transferPending = actor;
-            pauseLabel = 'Select the receiver (1/2/3)';
+            handlePartyMemberDefeated(actor);
         }
         return true;
     }
@@ -562,6 +572,13 @@ function attackSelectedPlayerFromProjectile(p) {
 function updateProjectiles(dt) {
     for (let i = projectiles.length - 1; i >= 0; i--) {
         const p = projectiles[i];
+        if (p.owner === 'enemy' && !p.spreadApplied) {
+            const speed = Math.hypot(p.vx, p.vy);
+            const angle = Math.atan2(p.vy, p.vx) + (Math.random() * 10 - 5) * Math.PI / 180;
+            p.vx = Math.cos(angle) * speed;
+            p.vy = Math.sin(angle) * speed;
+            p.spreadApplied = true;
+        }
         p.x += p.vx * (dt / 16);
         p.y += p.vy * (dt / 16);
         if (p.ttl !== undefined) {
@@ -589,6 +606,7 @@ function updateProjectiles(dt) {
                         projectiles.splice(idx1, 1);
                         projectiles.splice(idx2, 1);
                         log('Enemy projectile intercepted!');
+                        i = Math.min(i, j);
                         intercepted = true;
                         break;
                     }
@@ -633,7 +651,7 @@ function startBitBunnyGuns() {
     const cx = actor.x + actor.size / 2;
     const cy = actor.y + actor.size / 2;
     const guns = [];
-    const count = 10;
+    const count = 7;
     for (let i = 0; i < count; i++) {
         const ang = (Math.PI * 2 / count) * i;
         guns.push({
@@ -884,6 +902,7 @@ function updateEnemyAI(dt) {
     if (enemy.key === 'darkwizard') {
         if (enemy.attackClock > 1400) {
             enemy.attackClock = 0;
+            enemy.attackFlags.darkWizardVolley = false;
             const wx = randInt(150, canvas.width - 250);
             const wy = randInt(80, canvas.height - 80);
             spawnSpellbookWarning(wx, wy, 1200);
@@ -901,7 +920,8 @@ function updateEnemyAI(dt) {
             }
         }
 
-        if (enemy.attackClock > 700 && enemy.attackClock < 1200) {
+        if (enemy.attackClock > 700 && enemy.attackClock < 1200 && !enemy.attackFlags.darkWizardVolley) {
+            enemy.attackFlags.darkWizardVolley = true;
             const dx = (actor.x + actor.size / 2) - (enemy.x + enemy.size / 2);
             const dy = (actor.y + actor.size / 2) - (enemy.y + enemy.size / 2);
             const len = Math.hypot(dx, dy) || 1;
@@ -910,9 +930,9 @@ function updateEnemyAI(dt) {
                 y: enemy.y + enemy.size / 2,
                 vx: (dx / len) * 4,
                 vy: (dy / len) * 4,
-                radius: 8,
+                radius: 10,
                 owner: 'enemy',
-                damage: 8,
+                damage: 10,
                 kind: 'crystal',
                 ttl: 5000
             });
@@ -990,6 +1010,9 @@ function updateEnemyAI(dt) {
     if (enemy.key === 'cyberdio') {
         if (enemy.attackClock > 8000) {
             enemy.attackClock = 0;
+            enemy.attackFlags.cyberKnives = false;
+            enemy.attackFlags.cyberStopSign = false;
+            enemy.attackFlags.cyberRoadRoller = false;
             // avoid scheduling again while a time-hit is pending
             if (!enemy.timeHitScheduled) {
                 enemy.timeHitScheduled = true;
@@ -1000,13 +1023,12 @@ function updateEnemyAI(dt) {
                     const current = getSelectedActor();
                     if (current && current.alive) {
                         // direct HP subtraction: unblockable/undodgeable/uncounterable 5 HP total
-                        current.hp -= 1;
+                        current.hp -= 10;
                         current.hitFlash = 200;
                         if (current.hp <= 0) {
                             current.hp = 0;
                             current.alive = false;
-                            transferPending = current;
-                            log(current.name + ' has fallen. Press 1/2/3 to transfer power.');
+                            handlePartyMemberDefeated(current);
                         } else {
                             log('Cyber Dio time-hit damaged ' + current.name + ' for 5 HP.');
                         }
@@ -1017,7 +1039,8 @@ function updateEnemyAI(dt) {
             }
         }
 
-        if (enemy.attackClock > 1600 && enemy.attackClock < 2200) {
+        if (enemy.attackClock > 1600 && !enemy.attackFlags.cyberKnives) {
+            enemy.attackFlags.cyberKnives = true;
             const dx = (actor.x + actor.size / 2) - (enemy.x + enemy.size / 2);
             const dy = (actor.y + actor.size / 2) - (enemy.y + enemy.size / 2);
             const len = Math.hypot(dx, dy) || 1;
@@ -1029,7 +1052,7 @@ function updateEnemyAI(dt) {
                     vy: (dy / len) * (5 + i * 0.15),
                     radius: 5,
                     owner: 'enemy',
-                    damage: 0.5,
+                    damage: 7,
                     kind: 'knife',
                     ttl: 6000,
                     tamper: true,
@@ -1039,7 +1062,8 @@ function updateEnemyAI(dt) {
             log('Cyber Dio throws knives. Each knife can tamper with passives.');
         }
 
-        if (enemy.attackClock > 5200 && enemy.attackClock < 5600) {
+        if (enemy.attackClock > 5200 && !enemy.attackFlags.cyberStopSign) {
+            enemy.attackFlags.cyberStopSign = true;
             // show a full-screen-ish telegraph and delay the hit so the player sees the warning
             addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.12)', 700);
             log('Cyber Dio prepares to whack the selected member with a Stop Sign.');
@@ -1047,12 +1071,13 @@ function updateEnemyAI(dt) {
                 const current = getSelectedActor();
                 if (current && current.alive) {
                     // use the safe helper so this telegraphed attack can't insta-kill a defended member
-                    applyDamageToActor(current, 1, 'Stop Sign', true);
+                    applyDamageToActor(current, 7, 'Stop Sign', true);
                 }
             }, 700);
         }
 
-        if (enemy.attackClock > 6400 && enemy.attackClock < 7000) {
+        if (enemy.attackClock > 6400 && !enemy.attackFlags.cyberRoadRoller) {
+            enemy.attackFlags.cyberRoadRoller = true;
             const rollerX = canvas.width - 120;
             // telegraph the road roller across the selected member's lane
             addTelegraph(rollerX, actor.y - 20, 90, actor.size + 40, 'rgba(255, 0, 0, 0.2)', 900);
@@ -1072,7 +1097,7 @@ function updateEnemyAI(dt) {
 
     if (enemy.key === 'bitbunny') {
         // If in final phase (<=50HP) keep techno meteor behavior
-        if (enemy.hp <= 10) {
+        if (enemy.hp <= 100) {
             onlyM1Phase = true;
             if (enemy.attackClock > 500) {
                 enemy.attackClock = 0;
@@ -1338,7 +1363,7 @@ function draw() {
             ctx.closePath();
             ctx.fill();
         } else if (p.kind === 'crystal') {
-            ctx.fillStyle = '#d8f9ff';
+            ctx.fillStyle = '#85dfef';
             ctx.beginPath();
             ctx.moveTo(p.x, p.y - p.radius);
             ctx.lineTo(p.x + p.radius, p.y + p.radius);
