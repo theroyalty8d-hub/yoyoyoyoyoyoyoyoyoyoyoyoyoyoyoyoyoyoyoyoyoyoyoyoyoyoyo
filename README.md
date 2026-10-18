@@ -1,1 +1,2 @@
-# Ascendence, a battle game by Michael, Sarim, and Maxwell
+# Ascendence
+### a battle game by Michael, Sarim, and Maxwell
