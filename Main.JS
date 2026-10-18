@@ -853,7 +853,7 @@ function update(dt) {
     onEnemyDefeated();
   }
 
-  // Only change selectedIndex automatically if the currently selected member is missing or dead
+  // Only change selectedIndex automatically if the currently selected actor is missing or dead
   const currentActor = getSelectedActor();
   if (!currentActor || !currentActor.alive) {
     const firstAlive = party.findIndex((p) => p.alive);
