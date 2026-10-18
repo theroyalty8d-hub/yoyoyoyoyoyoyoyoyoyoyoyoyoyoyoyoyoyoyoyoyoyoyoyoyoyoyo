@@ -26,10 +26,10 @@ const partyTemplate = [
         defendStartAt: 0,
         defendCooldownUntil: 0,
         m1Gain: 2,
-        m1Damage: 10,
+        m1Damage: 8,
         defendReduction: 0.5,
         specialCost: 10,
-        specialDamage: 55,
+        specialDamage: 60,
         counterChance: 1.0,
         passiveCost: 5,
         passiveDamage: 25,
@@ -77,8 +77,8 @@ const partyTemplate = [
         y: 360,
         size: 34,
         color: 'green',
-        maxHp: 25,
-        hp: 25,
+        maxHp: 40,
+        hp: 40,
         maxPb: 10,
         pb: 0,
         speed: 2.5,
@@ -1029,7 +1029,7 @@ function updateEnemyAI(dt) {
                     vy: (dy / len) * (5 + i * 0.15),
                     radius: 5,
                     owner: 'enemy',
-                    damage: 2,
+                    damage: 0.5,
                     kind: 'knife',
                     ttl: 6000,
                     tamper: true,
@@ -1071,7 +1071,7 @@ function updateEnemyAI(dt) {
     }
 
     if (enemy.key === 'bitbunny') {
-        // If in final phase (<=10HP) keep techno meteor behavior
+        // If in final phase (<=50HP) keep techno meteor behavior
         if (enemy.hp <= 10) {
             onlyM1Phase = true;
             if (enemy.attackClock > 500) {
