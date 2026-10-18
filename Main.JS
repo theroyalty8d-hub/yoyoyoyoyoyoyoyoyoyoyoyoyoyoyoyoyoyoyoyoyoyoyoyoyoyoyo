@@ -28,7 +28,7 @@ const partyTemplate = [
         m1Damage: 10,
         defendReduction: 0.5,
         specialCost: 10,
-        specialDamage: 55,
+        specialDamage: 60,
         counterChance: 1.0,
         passiveCost: 5,
         passiveDamage: 25,
