@@ -714,15 +714,26 @@ function updateHyperBit(dt) {
 }
 
 function startTurreteer() {
+    // Delay the actual lock so the player isn't immediately immobilized when the fight starts.
     enemy.bitPhase = 'turret';
     enemy.bitPhaseTimer = 0;
-    enemy.bitTurret = { duration: 9000, missileTimer: 0 };
-    const actor = getSelectedActor();
+    // store a small lockDelay and a place to keep the timeout id so we can cancel it if the phase ends early
+    enemy.bitTurret = { duration: 9000, missileTimer: 0, lockDelay: 700, lockTimeout: null };
+    const sel = selectedIndex;
+    // show a telegraph on the selected member's lane so the player sees the incoming turret
+    const actor = party[sel];
     if (actor) {
-        // lock player in place for the turret duration
-        actor.lockedUntil = performance.now() + enemy.bitTurret.duration;
+        addTelegraph(canvas.width - 160, actor.y - 40, 140, actor.size + 80, 'rgba(255,0,0,0.12)', enemy.bitTurret.lockDelay);
     }
-    log('Bit Bunny: Turreteer - player locked on turret!');
+    // schedule the lock shortly after the phase starts (gives player a window to move)
+    enemy.bitTurret.lockTimeout = setTimeout(() => {
+        const actorLock = party[sel];
+        if (actorLock) {
+            actorLock.lockedUntil = performance.now() + enemy.bitTurret.duration;
+            log('Bit Bunny: Turreteer - player locked on turret!');
+        }
+    }, enemy.bitTurret.lockDelay);
+    log('Bit Bunny: Turreteer - turret incoming!');
 }
 
 function updateTurreteer(dt) {
@@ -736,6 +747,8 @@ function updateTurreteer(dt) {
         spawnMissile(randInt(200, canvas.width - 200), -20);
     }
     if (enemy.bitPhaseTimer > t.duration) {
+        // clear pending lock timeout if phase ends before the lock happens
+        if (t.lockTimeout) { clearTimeout(t.lockTimeout); t.lockTimeout = null; }
         enemy.bitPhase = null;
         enemy.bitTurret = null;
         log('Turreteer ended.');
