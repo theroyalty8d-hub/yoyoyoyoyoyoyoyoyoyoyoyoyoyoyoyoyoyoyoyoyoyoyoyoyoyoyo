@@ -1,1 +1,1 @@
-Project for Michael, Sarim, and Max
+# Ascendence, a battle game by Michael, Sarim, and Maxwell
