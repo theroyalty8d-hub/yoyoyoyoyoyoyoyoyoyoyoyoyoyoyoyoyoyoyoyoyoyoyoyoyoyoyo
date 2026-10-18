@@ -598,8 +598,8 @@ function startBitBunnyGuns() {
     guns.push({
       x: cx + Math.cos(ang) * 140,
       y: cy + Math.sin(ang) * 140,
-      ang
-n    });
+      ang: ang
+    });
   }
   enemy.bitGuns = { guns, cycleTimer: 0, duration: 10000, teleTimer: 0 };
   // show telegraphs
@@ -765,7 +765,17 @@ function updateTimedFinale(dt) {
       const count = 6;
       for (let i = 0; i < count; i++) {
         const ang = Math.random() * Math.PI*2;
-        projectiles.push({ x: enemy.x + enemy.size/2, y: enemy.y + enemy.size/2, vx: Math.cos(ang)*(2+Math.random()*3), vy: Math.sin(ang)*(2+Math.random()*3), radius: 6, owner: 'enemy', damage: 3, kind: 'bullet', ttl: 4000 });
+        projectiles.push({
+          x: enemy.x + enemy.size/2,
+          y: enemy.y + enemy.size/2,
+          vx: Math.cos(ang)*(2+Math.random()*3),
+          vy: Math.sin(ang)*(2+Math.random()*3),
+          radius: 6,
+          owner: 'enemy',
+          damage: 3,
+          kind: 'bullet',
+          ttl: 4000
+        });
       }
     }
   }
@@ -1114,14 +1124,6 @@ function update(dt) {
         log(actor.name + ' stopped defending. Cooldown 10s.');
       }
     }
-
-    // Note: Z no longer increases PB
-    // if (keys['z'] || keys['Z']) {
-    //   actor.defending = true;
-    //   actor.pb = clamp(actor.pb + 5, 0, actor.maxPb);
-    // } else {
-    //   actor.defending = false;
-    // }
 
     if (keys[' ']) {
       keys[' '] = false;
