@@ -25,7 +25,7 @@ const partyTemplate = [
         defending: false,
         defendStartAt: 0,
         defendCooldownUntil: 0,
-        m1Gain: 2,
+        m1Gain: 1,
         m1Damage: 8,
         defendReduction: 0.5,
         specialCost: 10,
@@ -56,7 +56,7 @@ const partyTemplate = [
         defending: false,
         defendStartAt: 0,
         defendCooldownUntil: 0,
-        m1Gain: 2,
+        m1Gain: 1,
         m1Damage: 10,
         defendReduction: 0.25,
         specialCost: 10,
@@ -113,6 +113,13 @@ let messages = [];
 let enemy = null;
 let currentEnemyIndex = 0;
 let lastFrame = performance.now();
+let gameStarted = false;
+let gamePaused = false;
+let runStartedAt = 0;
+let runFinishedAt = null;
+let pauseStartedAt = 0;
+let pausedDuration = 0;
+const gameTimeouts = new Set();
 let transferPending = null;
 let onlyM1Phase = false;
 let holdXStartedAt = null;
@@ -135,10 +142,89 @@ const enemyRoster = [
     { key: 'cyberdio', name: 'Cyber Dio', hp: 500, maxHp: 500, size: 60, color: '#1a1a1a', damage: 5 },
     { key: 'bitbunny', name: 'Bit Bunny', hp: 700, maxHp: 700, size: 76, color: '#7ce7ff', damage: 10 }
 ];
+const LEADERBOARD_STORAGE_KEY = 'ascendanceLeaderboard';
+let leaderboard = loadLeaderboard();
 
 function log(msg) {
     messages.unshift(msg);
     if (messages.length > 8) messages.pop();
+}
+
+function loadLeaderboard() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(LEADERBOARD_STORAGE_KEY) || '[]');
+        return Array.isArray(saved)
+            ? saved.filter((entry) => entry && Number.isFinite(entry.timeMs) && entry.timeMs >= 0)
+                .sort((a, b) => a.timeMs - b.timeMs)
+                .slice(0, 5)
+            : [];
+    } catch {
+        return [];
+    }
+}
+
+function recordWinTime(timeMs) {
+    leaderboard.push({ timeMs });
+    leaderboard.sort((a, b) => a.timeMs - b.timeMs);
+    leaderboard = leaderboard.slice(0, 5);
+    try {
+        localStorage.setItem(LEADERBOARD_STORAGE_KEY, JSON.stringify(leaderboard));
+    } catch {
+        // Keep this run's score available for the current session if storage is unavailable.
+    }
+}
+
+function formatRunTime(timeMs) {
+    const totalSeconds = Math.floor(timeMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+}
+
+function getRunElapsedMs() {
+    if (!gameStarted) return 0;
+    const endTime = runFinishedAt ?? (gamePaused ? pauseStartedAt : performance.now());
+    return Math.max(0, endTime - runStartedAt - pausedDuration);
+}
+
+function armGameTimeout(task) {
+    task.startedAt = performance.now();
+    task.timerId = setTimeout(() => {
+        gameTimeouts.delete(task);
+        task.timerId = null;
+        task.callback();
+    }, task.remaining);
+}
+
+function scheduleGameTimeout(callback, delay) {
+    const task = { callback, remaining: delay, startedAt: 0, timerId: null };
+    gameTimeouts.add(task);
+    if (!gamePaused) armGameTimeout(task);
+    return task;
+}
+
+function clearGameTimeout(task) {
+    if (!task) return;
+    if (task.timerId !== null) clearTimeout(task.timerId);
+    gameTimeouts.delete(task);
+}
+
+function pauseGameTimeouts() {
+    const now = performance.now();
+    for (const task of gameTimeouts) {
+        if (task.timerId === null) continue;
+        clearTimeout(task.timerId);
+        task.remaining = Math.max(0, task.remaining - (now - task.startedAt));
+        task.timerId = null;
+    }
+}
+
+function resumeGameTimeouts() {
+    for (const task of gameTimeouts) armGameTimeout(task);
+}
+
+function clearPendingGameTimeouts() {
+    for (const task of gameTimeouts) clearGameTimeout(task);
 }
 
 function getSelectedActor() {
@@ -213,6 +299,9 @@ function onEnemyDefeated() {
     log(enemy.name + ' was defeated!');
     currentEnemyIndex += 1;
     if (currentEnemyIndex >= enemyRoster.length) {
+        runFinishedAt = performance.now();
+        recordWinTime(getRunElapsedMs());
+        clearPendingGameTimeouts();
         enemy = null;
         log('YOU WIN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
         return;
@@ -345,10 +434,10 @@ function doPassive(actor) {
     } else if (actor.id === 2) {
         if (actor.pb < 5) { log(actor.name + ' needs 5 PB for passive.'); return; }
         actor.pb -= 5;
-        e.hp -= 25;
-        const steal = Math.max(1, Math.floor(e.maxHp * 0.02));
+        e.hp -= 20;
+        const steal = Math.max(1, Math.floor(e.maxHp * 0.015));
         actor.hp = clamp(actor.hp + steal, 0, actor.maxHp);
-        log(actor.name + ' used Passive: Teleport + steal (-25 dmg, +' + steal + ' HP).');
+        log(actor.name + ' used Passive: Teleport + steal (-20 dmg, +' + steal + ' HP).');
     } else if (actor.id === 3) {
         if (actor.pb >= 10) {
             actor.pb -= 10;
@@ -413,6 +502,8 @@ function doSpecial(actor) {
 
 function doFinalAttack(actor) {
     if (!actor || !actor.alive) return;
+    const boss = getAliveEnemy();
+    if (!boss) return;
     if (actor.pb < actor.maxPb) {
         log(actor.name + ' needs full PB for the Final Attack.');
         return;
@@ -420,13 +511,15 @@ function doFinalAttack(actor) {
     actor.pb = 0;
     for (let i = 0; i < 8; i++) {
         projectiles.push({
-            x: randInt(500, 820),
+            x: boss.x + randInt(0, boss.size),
             y: -50 - i * 40,
             vx: randInt(-2, 2),
             vy: 3.2 + i * 0.35,
             radius: 16,
             owner: 'player',
-            damage: Math.ceil(actor.maxHp * 0.5),
+            damagePercent: 0.55 / 8,
+            piercing: true,
+            pierceBoss: false,
             kind: 'meteor',
             ttl: 10000
         });
@@ -506,10 +599,12 @@ function updateTelegraphs(dt) {
 function attackEnemyFromProjectile(p) {
     const e = getAliveEnemy();
     if (!e) return false;
+    if (p.piercing && p.pierceBoss && p.lastHitEnemy === e) return false;
     const hitX = p.x >= e.x && p.x <= e.x + e.size;
     const hitY = p.y >= e.y && p.y <= e.y + e.size;
     if (hitX && hitY) {
-        e.hp -= p.damage;
+        if (p.piercing && p.pierceBoss) p.lastHitEnemy = e;
+        e.hp -= p.damagePercent ? e.maxHp * p.damagePercent : p.damage;
         pushParticle(p.x, p.y, '#4fe9ff');
         if (e.hp <= 0) {
             e.hp = 0;
@@ -590,7 +685,7 @@ function updateProjectiles(dt) {
         }
 
         // New: allow player projectiles to intercept enemy projectiles (projectile vs projectile)
-        if (p.owner === 'player') {
+        if (p.owner === 'player' && !p.piercing) {
             let intercepted = false;
             for (let j = projectiles.length - 1; j >= 0; j--) {
                 const q = projectiles[j];
@@ -617,12 +712,12 @@ function updateProjectiles(dt) {
 
         if (p.owner === 'player') {
             // first allow player shots to hit robots
-            if (attackRobotFromProjectile(p)) {
+            if (!p.piercing && attackRobotFromProjectile(p)) {
                 projectiles.splice(i, 1);
                 continue;
             }
             if (attackEnemyFromProjectile(p)) {
-                projectiles.splice(i, 1);
+                if (!p.piercing || !p.pierceBoss) projectiles.splice(i, 1);
                 continue;
             }
         } else if (p.owner === 'enemy') {
@@ -785,7 +880,7 @@ function startTurreteer() {
         addTelegraph(canvas.width - 160, actor.y - 40, 140, actor.size + 80, 'rgba(255,0,0,0.12)', enemy.bitTurret.lockDelay);
     }
     // schedule the lock shortly after the phase starts (gives player a window to move)
-    enemy.bitTurret.lockTimeout = setTimeout(() => {
+    enemy.bitTurret.lockTimeout = scheduleGameTimeout(() => {
         const actorLock = party[sel];
         if (actorLock) {
             actorLock.lockedUntil = performance.now() + enemy.bitTurret.duration;
@@ -807,7 +902,7 @@ function updateTurreteer(dt) {
     }
     if (enemy.bitPhaseTimer > t.duration) {
         // clear pending lock timeout if phase ends before the lock happens
-        if (t.lockTimeout) { clearTimeout(t.lockTimeout); t.lockTimeout = null; }
+        if (t.lockTimeout) { clearGameTimeout(t.lockTimeout); t.lockTimeout = null; }
         enemy.bitPhase = null;
         enemy.bitTurret = null;
         log('Turreteer ended.');
@@ -859,7 +954,7 @@ function updateTimedFinale(dt) {
     if (enemy.bitPhaseTimer > f.duration) {
         // glitch parts of screen then damage
         addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.12)', 700);
-        setTimeout(() => {
+        scheduleGameTimeout(() => {
             const current = getSelectedActor();
             if (current && current.alive) applyDamageToActor(current, 10, 'Timed Finale');
         }, 700);
@@ -907,7 +1002,7 @@ function updateEnemyAI(dt) {
             const wy = randInt(80, canvas.height - 80);
             spawnSpellbookWarning(wx, wy, 1200);
             log('Dark Wizard marks a random spellbook zone.');
-            const triggerTimer = setTimeout(() => {
+            const triggerTimer = scheduleGameTimeout(() => {
                 const current = getSelectedActor();
                 if (!current || !current.alive) return;
                 const centerX = current.x + current.size / 2;
@@ -1019,7 +1114,7 @@ function updateEnemyAI(dt) {
                 addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.18)', 700);
                 log('Cyber Dio hacks time and prepares to attack the selected member for 5 HP.');
                 // delay the actual damage so the telegraph is a real warning
-                setTimeout(() => {
+                scheduleGameTimeout(() => {
                     const current = getSelectedActor();
                     if (current && current.alive) {
                         // direct HP subtraction: unblockable/undodgeable/uncounterable 5 HP total
@@ -1067,7 +1162,7 @@ function updateEnemyAI(dt) {
             // show a full-screen-ish telegraph and delay the hit so the player sees the warning
             addTelegraph(0, 0, canvas.width, canvas.height, 'rgba(255,255,255,0.12)', 700);
             log('Cyber Dio prepares to whack the selected member with a Stop Sign.');
-            setTimeout(() => {
+            scheduleGameTimeout(() => {
                 const current = getSelectedActor();
                 if (current && current.alive) {
                     // use the safe helper so this telegraphed attack can't insta-kill a defended member
@@ -1082,7 +1177,7 @@ function updateEnemyAI(dt) {
             // telegraph the road roller across the selected member's lane
             addTelegraph(rollerX, actor.y - 20, 90, actor.size + 40, 'rgba(255, 0, 0, 0.2)', 900);
             log('Cyber Dio is rolling the Road Roller through the selected member.');
-            setTimeout(() => {
+            scheduleGameTimeout(() => {
                 const current = getSelectedActor();
                 if (current && current.alive) {
                     const collides = current.x + current.size > rollerX && current.x < rollerX + 90;
@@ -1157,6 +1252,7 @@ function updateEnemyAI(dt) {
 }
 
 function update(dt) {
+    if (!gameStarted || gamePaused || runFinishedAt !== null) return;
     if (transferPending) {
         if (keys['1']) { transferPower(transferPending, 0); keys['1'] = false; }
         if (keys['2']) { transferPower(transferPending, 1); keys['2'] = false; }
@@ -1281,8 +1377,48 @@ function destroyAtPoint(x, y, radius = 24) {
     }
 }
 
+function startGame() {
+    if (gameStarted) return;
+    gameStarted = true;
+    runStartedAt = performance.now();
+    pausedDuration = 0;
+    lastFrame = runStartedAt;
+}
+
+function togglePause() {
+    if (runFinishedAt !== null) return;
+    if (!gameStarted) startGame();
+    if (gamePaused) {
+        const now = performance.now();
+        const duration = now - pauseStartedAt;
+        pausedDuration += duration;
+        party.forEach((actor) => {
+            ['defendStartAt', 'defendCooldownUntil', 'lastM1', 'passiveBlockedUntil', 'lockedUntil'].forEach((key) => {
+                if (actor[key] > 0) actor[key] += duration;
+            });
+        });
+        if (lastCursorShot > 0) lastCursorShot += duration;
+        gamePaused = false;
+        pauseStartedAt = 0;
+        lastFrame = now;
+        resumeGameTimeouts();
+    } else {
+        gamePaused = true;
+        pauseStartedAt = performance.now();
+        keys = {};
+        holdXStartedAt = null;
+        pauseGameTimeouts();
+    }
+}
+
 window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
+    if (e.key === 'Escape' || e.key.toLowerCase() === 'p') {
+        togglePause();
+        return;
+    }
+    if (gamePaused || runFinishedAt !== null) return;
+    startGame();
     keys[e.key] = true;
     if (e.key === '1') selectedIndex = 0;
     if (e.key === '2') selectedIndex = 1;
@@ -1309,6 +1445,8 @@ canvas.addEventListener('mousemove', (e) => {
     cursorY = e.clientY - rect.top;
 });
 canvas.addEventListener('mousedown', (e) => {
+    if (gamePaused || runFinishedAt !== null) return;
+    startGame();
     // only allow cursor-shot in turret phase
     if (enemy && enemy.bitPhase === 'turret') {
         const now = performance.now();
@@ -1422,6 +1560,7 @@ function draw() {
     ctx.font = '16px sans-serif';
     ctx.fillText('Selected: ' + party[selectedIndex].name, 20, 26);
     ctx.fillText('Controls: Arrows move, Space M1, Z defend, C passive, X special/final', 20, 48);
+    ctx.fillText('Time: ' + formatRunTime(getRunElapsedMs()), canvas.width - 160, 26);
     if (transferPending) ctx.fillText('Transfer power: press 1, 2, or 3', 20, 70);
     if (onlyM1Phase) ctx.fillText('Final Phase: only M1 is allowed.', 20, 92);
 
@@ -1452,8 +1591,51 @@ function draw() {
         ctx.fillText('Click to intercept bullets', cursorX + 18, cursorY - 18);
     }
 
-    for (let i = 0; i < messages.length; i++) {
-        ctx.fillText(messages[i], 20, canvas.height - 22 - i * 18);
+    if (!gameStarted) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.font = '28px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Press any key or click to start', canvas.width / 2, canvas.height / 2);
+        ctx.restore();
+    }
+
+    if (gamePaused) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 32px sans-serif';
+        ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2 - 12);
+        ctx.font = '16px sans-serif';
+        ctx.fillText('Press P or Escape to resume', canvas.width / 2, canvas.height / 2 + 24);
+        ctx.restore();
+    }
+
+    if (runFinishedAt !== null) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 34px sans-serif';
+        ctx.fillText('YOU WIN!', canvas.width / 2, 112);
+        ctx.font = '18px sans-serif';
+        ctx.fillText('Your time: ' + formatRunTime(getRunElapsedMs()), canvas.width / 2, 154);
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText('LEADERBOARD', canvas.width / 2, 208);
+        ctx.font = '17px sans-serif';
+        if (leaderboard.length === 0) {
+            ctx.fillText('No completed runs yet.', canvas.width / 2, 248);
+        } else {
+            leaderboard.forEach((entry, index) => {
+                ctx.fillText((index + 1) + '.  ' + formatRunTime(entry.timeMs), canvas.width / 2, 248 + index * 30);
+            });
+        }
+        ctx.restore();
     }
 }
 
@@ -1467,6 +1649,12 @@ function gameLoop() {
 }
 
 function initGame() {
+    gameStarted = false;
+    gamePaused = false;
+    runStartedAt = 0;
+    runFinishedAt = null;
+    pauseStartedAt = 0;
+    pausedDuration = 0;
     resetPartyForRound();
     spawnEnemy(0);
     tutorialMode = true;
