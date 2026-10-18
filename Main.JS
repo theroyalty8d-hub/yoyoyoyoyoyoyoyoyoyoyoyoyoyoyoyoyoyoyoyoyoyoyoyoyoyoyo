@@ -104,6 +104,7 @@ const partyTemplate = [
 
 let party = partyTemplate.map((p) => ({ ...p }));
 let selectedIndex = 0;
+let tutorialPage = 0;
 let nextCharacterSwapAt = 0;
 let keys = {};
 let projectiles = [];
@@ -141,6 +142,50 @@ const cursorCooldown = 200; // ms between cursor shots
 const parryWindowMs = 350;
 const finalAttackCost = 10;
 const characterSwapCooldownMs = 3000;
+const tutorialPages = [
+    {
+        title: 'Welcome, heroes!',
+        lines: [
+            'Move with the arrow keys. Press 1, 2, or 3 to swap characters (3-second cooldown).',
+            'Press Space for M1: every hit grants 1 PB. M1 has a 1-second cooldown.',
+            'Tap X for Special (10 PB). Hold X for 0.6 seconds at 10 PB for Final Attack.',
+            'Final Attack sends 8 meteors; each deals 45% of boss max HP. Wide lanes can miss.',
+            'Tap Z up to 350 ms before impact to parry and reflect it; hold Z to reduce damage.',
+            'PB max is 10. In the final phase, only M1 and Final Attack are available.'
+        ]
+    },
+    {
+        title: 'Magatank | Red Guardian',
+        lines: [
+            'M1 | Space | 8 damage and +1 PB.',
+            'Passive | C | Costs 5 PB and deals 25 direct damage to the boss.',
+            'Special | Tap X | Costs 10 PB; 7-shot barrage deals 60 total damage and stuns 0.6 sec.',
+            'Defense | Hold Z | Reduces incoming damage by 50%; maximum hold is 5 seconds.',
+            'Releasing Z starts a 10-second defense cooldown. A well-timed tap parries instead.'
+        ]
+    },
+    {
+        title: 'Magaknight | Silver Striker',
+        lines: [
+            'M1 | Space | 10 damage and +1 PB.',
+            'Passive | C | Costs 5 PB, deals 20 damage, and heals you by 1.5% of boss max HP (minimum 1).',
+            'Special | Tap X | Costs 10 PB; 7-shot barrage deals 55 total damage and stuns 0.6 sec.',
+            'Defense | Hold Z | Reduces incoming damage by 25%; maximum hold is 5 seconds.',
+            'Releasing Z starts a 10-second defense cooldown. A well-timed tap parries instead.'
+        ]
+    },
+    {
+        title: 'True Mage | Emerald Healer',
+        lines: [
+            'M1 | Space | 15 damage and +1 PB.',
+            'Passive | C | 10 PB heals all living allies by 75%; 6 PB heals two by 50%.',
+            'With 3 PB, the passive heals you by 25% of your max HP.',
+            'Special | Tap X | Costs 10 PB; 7-shot barrage deals 70 total damage and stuns 0.6 sec.',
+            'Defense | Hold Z | Reduces incoming damage by 15%; maximum hold is 5 seconds.',
+            'Releasing Z starts a 10-second defense cooldown. A well-timed tap parries instead.'
+        ]
+    }
+];
 
 const enemyRoster = [
     { key: 'lightwizard', name: 'Light Wizard', hp: 100, maxHp: 100, size: 72, color: '#f5d942', damage: 7 },
@@ -1438,6 +1483,16 @@ function startGame() {
     lastFrame = runStartedAt;
 }
 
+function advanceTutorial(direction = 1) {
+    if (direction < 0) {
+        tutorialPage = Math.max(0, tutorialPage - 1);
+    } else if (tutorialPage < tutorialPages.length - 1) {
+        tutorialPage += 1;
+    } else {
+        startGame();
+    }
+}
+
 function togglePause() {
     if (runFinishedAt !== null) return;
     if (!gameStarted) startGame();
@@ -1468,11 +1523,15 @@ function togglePause() {
 window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     if (e.key === 'Escape' || e.key.toLowerCase() === 'p') {
-        togglePause();
+        if (gameStarted) togglePause();
         return;
     }
     if (gamePaused || runFinishedAt !== null) return;
-    startGame();
+    if (!gameStarted) {
+        if (e.key === 'ArrowLeft') advanceTutorial(-1);
+        else if (e.key === 'ArrowRight' || e.key === 'Enter') advanceTutorial();
+        return;
+    }
     keys[e.key] = true;
     const requestedIndex = e.key === '1' ? 0 : e.key === '2' ? 1 : e.key === '3' ? 2 : -1;
     if (!transferPending && requestedIndex !== -1 && requestedIndex !== selectedIndex) {
@@ -1510,7 +1569,10 @@ canvas.addEventListener('mousemove', (e) => {
 });
 canvas.addEventListener('mousedown', (e) => {
     if (gamePaused || runFinishedAt !== null) return;
-    startGame();
+    if (!gameStarted) {
+        advanceTutorial();
+        return;
+    }
     // only allow cursor-shot in turret phase
     if (enemy && enemy.bitPhase === 'turret') {
         const now = performance.now();
@@ -1772,6 +1834,43 @@ function drawRobotSprite(robot) {
     ctx.restore();
 }
 
+function drawTutorialOverlay() {
+    const page = tutorialPages[tutorialPage];
+    ctx.fillStyle = 'rgba(5, 11, 20, 0.9)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#101d2a';
+    ctx.fillRect(42, 34, canvas.width - 84, canvas.height - 68);
+    ctx.strokeStyle = '#70d9ec';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(42, 34, canvas.width - 84, canvas.height - 68);
+
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#83e8f4';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText('LIGHT WIZARD | FIELD GUIDE', 76, 78);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 27px sans-serif';
+    ctx.fillText(page.title, 76, 119);
+    ctx.fillStyle = '#d8e4ed';
+    ctx.font = '16px sans-serif';
+    page.lines.forEach((line, index) => {
+        ctx.fillText(line, 78, 174 + index * 37);
+    });
+    ctx.strokeStyle = 'rgba(131, 232, 244, 0.35)';
+    ctx.beginPath();
+    ctx.moveTo(76, 445);
+    ctx.lineTo(canvas.width - 76, 445);
+    ctx.stroke();
+    ctx.fillStyle = '#a8bac7';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('Page ' + (tutorialPage + 1) + ' of ' + tutorialPages.length + ' | Left arrow: previous', 78, 478);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(tutorialPage === tutorialPages.length - 1 ? 'Enter or click: begin battle' : 'Enter, right arrow, or click: continue', canvas.width - 78, 478);
+    ctx.restore();
+}
+
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#dfe7ed';
@@ -1959,14 +2058,7 @@ function draw() {
     }
 
     if (!gameStarted) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.save();
-        ctx.fillStyle = '#fff';
-        ctx.font = '28px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Press any key or click to start', canvas.width / 2, canvas.height / 2);
-        ctx.restore();
+        drawTutorialOverlay();
     }
 
     if (gamePaused) {
@@ -2017,6 +2109,7 @@ function gameLoop() {
 
 function initGame() {
     gameStarted = false;
+    tutorialPage = 0;
     gamePaused = false;
     runStartedAt = 0;
     runFinishedAt = null;
