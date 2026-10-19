@@ -1,17 +1,18 @@
 h1, h2 {
-color: black
+color: gold
 text-align: center
+font-family: "Trebuchet MS", "Lucida Grande", "Lucida Sans Unicode", "Lucida Sans", sans-serif;
 }
 
 canvas {
-    background-color: rgba(0, 25, 100, 1); 
+    background-color: rgba(0, 25, 100, 1);
     box-shadow: 0 0 20px rgba(0,0,0,0.5);
 }
 
 html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  background-color: deepskyblue; /* Change this to your preferred color */
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background-color: deepskyblue; /* Change this to your preferred color */
 }
