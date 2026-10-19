@@ -1873,7 +1873,7 @@ function drawTutorialOverlay() {
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#dfe7ed';
+    ctx.fillStyle = '#2f3399';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     for (const t of telegraphs) {
