@@ -1,2 +1,2 @@
 # Ascendence
-### a battle game by Michael, Sarim, and Maxwell
+### A battle game by The Fun Gang: Michael, Sarim, and Maxwell
